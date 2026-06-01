@@ -70,6 +70,7 @@ class QuotaControllerTest(unittest.TestCase):
             refresh_at="2026-06-08 12:00",
             day_key="2026-06-01",
             day_start_remaining=70,
+            last_sync_at="2026-06-01 12:00",
         )
         controller = QuotaController(state)
 
@@ -77,6 +78,21 @@ class QuotaControllerTest(unittest.TestCase):
 
         self.assertEqual(state.remaining_quota, 65)
         self.assertEqual(state.today_used, 5)
+
+    def test_first_remote_sync_establishes_baseline_without_counting_usage(self) -> None:
+        state = QuotaState(
+            remaining_quota=100,
+            refresh_at="2026-06-08 12:00",
+            day_key="2026-06-01",
+            day_start_remaining=100,
+        )
+        controller = QuotaController(state)
+
+        controller.sync_remote_usage(73, None, datetime(2026, 6, 1, 13, 0))
+
+        self.assertEqual(state.remaining_quota, 73)
+        self.assertEqual(state.day_start_remaining, 73)
+        self.assertEqual(state.today_used, 0)
 
     def test_remote_usage_increase_after_refresh_resets_today_usage(self) -> None:
         state = QuotaState(

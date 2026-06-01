@@ -114,7 +114,11 @@ class QuotaController:
             raise ValueError("网页未识别出刷新时间，请先手动填写一次。")
         self.normalize(now)
         refresh_changed = old_refresh and self.state.refresh_at != old_refresh
-        if remaining_quota > old_remaining and refresh_changed:
+        if not self.state.last_sync_at:
+            self.state.day_key = now.date().isoformat()
+            self.state.day_start_remaining = remaining_quota
+            self.state.today_used = 0.0
+        elif remaining_quota > old_remaining and refresh_changed:
             self.state.day_key = now.date().isoformat()
             self.state.day_start_remaining = remaining_quota
             self.state.today_used = 0.0
