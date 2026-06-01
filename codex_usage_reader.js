@@ -1,5 +1,7 @@
 const path = require("path");
 const os = require("os");
+const fs = require("fs");
+const { spawn } = require("child_process");
 const { chromium } = require("playwright-core");
 
 const USAGE_URL = "https://chatgpt.com/codex/settings/usage";
@@ -31,12 +33,12 @@ async function launch(headless) {
 function findWeeklyBlock(text) {
   const lines = text.split(/\r?\n/).map((line) => line.trim()).filter(Boolean);
   const index = lines.findIndex((line) =>
-    /weekly usage limit|weekly limit|每周(?:使用)?(?:额度|限制)|周(?:使用)?(?:额度|限制)/i.test(line)
+    /weekly usage limit|weekly limit|每周(?:使用)?(?:额度|限制|限额)|周(?:使用)?(?:额度|限制|限额)/i.test(line)
   );
   if (index < 0) {
     throw new Error("未找到每周额度。请确认已登录，并已打开 Codex Usage 页面。");
   }
-  return lines.slice(index, index + 8).join(" ");
+  return lines.slice(index, index + 12).join(" ");
 }
 
 function extractRemaining(block) {
@@ -52,36 +54,58 @@ function extractRemaining(block) {
 }
 
 function extractResetAt(block) {
-  const match = block.match(/(?:resets?|reset(?:s)? at|重置(?:于|时间)?)[：:\s]*([^|]+)$/i);
+  const match = block.match(/(?:resets?|reset(?:s)? at|重置(?:于|时间)?)[：:\s]*((?:\d{4}年\d{1,2}月\d{1,2}日\s+\d{1,2}:\d{2})|(?:\d{4}-\d{1,2}-\d{1,2}(?:T|\s)\d{1,2}:\d{2}(?::\d{2})?))/i);
   if (!match) {
     return null;
   }
-  const value = match[1].trim();
+  const value = match[1].trim().replace(
+    /(\d{4})年(\d{1,2})月(\d{1,2})日\s+(\d{1,2}):(\d{2})/,
+    (_, year, month, day, hour, minute) =>
+      `${year}-${String(month).padStart(2, "0")}-${String(day).padStart(2, "0")}T${String(hour).padStart(2, "0")}:${minute}:00`
+  );
   const parsed = new Date(value);
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
 async function login() {
-  const context = await launch(false);
-  const pages = context.pages();
-  const page = pages[0] || await context.newPage();
-  await page.goto(USAGE_URL, { waitUntil: "domcontentloaded" });
+  const candidates = [
+    path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+    path.join(process.env["PROGRAMFILES(X86)"] || "", "Microsoft", "Edge", "Application", "msedge.exe"),
+    path.join(process.env.PROGRAMFILES || "", "Microsoft", "Edge", "Application", "msedge.exe"),
+  ];
+  const executable = candidates.find((candidate) => fs.existsSync(candidate));
+  if (!executable) {
+    throw new Error("未找到 Chrome 或 Edge。");
+  }
+  const browser = spawn(executable, [
+    `--user-data-dir=${PROFILE_DIR}`,
+    "--no-first-run",
+    USAGE_URL,
+  ], { stdio: "ignore" });
   console.log("请在浏览器中登录并确认能看到 Codex Usage 页面。完成后关闭浏览器窗口。");
-  await new Promise((resolve) => context.on("close", resolve));
+  await new Promise((resolve, reject) => {
+    browser.on("error", reject);
+    browser.on("close", resolve);
+  });
 }
 
 async function fetchUsage() {
-  const context = await launch(true);
+  const context = await launch(false);
   try {
     const pages = context.pages();
     const page = pages[0] || await context.newPage();
     await page.goto(USAGE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
-    await page.waitForTimeout(2500);
+    await page.waitForTimeout(6000);
     const text = await page.locator("body").innerText();
-    if (/log in|sign in|登录|登入/i.test(text) && !/weekly usage limit|每周(?:使用)?(?:额度|限制)/i.test(text)) {
+    if (/log in|sign in|登录|登入/i.test(text) && !/weekly usage limit|每周(?:使用)?(?:额度|限制|限额)/i.test(text)) {
       throw new Error("登录状态已失效，请点击“登录 Codex 网页”重新登录。");
     }
-    const block = findWeeklyBlock(text);
+    let block;
+    try {
+      block = findWeeklyBlock(text);
+    } catch (error) {
+      throw new Error(`${error.message} 当前页面：${page.url()}，文本长度：${text.length}`);
+    }
     console.log(JSON.stringify({
       remainingQuota: extractRemaining(block),
       refreshAt: extractResetAt(block),
