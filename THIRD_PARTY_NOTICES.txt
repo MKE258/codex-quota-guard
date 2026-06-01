@@ -1,0 +1,11 @@
+Codex Quota Guard includes third-party software:
+
+1. Node.js
+   License: MIT License
+   Website: https://nodejs.org/
+
+2. playwright-core
+   License: Apache License 2.0
+   Website: https://playwright.dev/
+
+This application is an unofficial tool and is not affiliated with or endorsed by OpenAI.

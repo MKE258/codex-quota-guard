@@ -1,0 +1,8 @@
+{
+  "name": "codex-quota-guard",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "playwright-core": "1.60.0"
+  }
+}
