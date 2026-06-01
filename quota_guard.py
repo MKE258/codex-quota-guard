@@ -22,6 +22,11 @@ READER_SCRIPT = APP_DIR / "codex_usage_reader.js"
 NODE_EXECUTABLE = APP_DIR / "node.exe" if (APP_DIR / "node.exe").exists() else "node"
 SYNC_INTERVAL_OPTIONS = (5, 15, 30, 60)
 PAUSE_POLICIES = ("仅提醒", "提醒后停止", "立即停止")
+SUBPROCESS_CREATION_FLAGS = (
+    subprocess.CREATE_NO_WINDOW | subprocess.CREATE_NEW_PROCESS_GROUP
+    if os.name == "nt"
+    else 0
+)
 
 
 def parse_datetime(value: str) -> datetime:
@@ -333,7 +338,7 @@ class QuotaGuardApp:
             subprocess.Popen(
                 [str(NODE_EXECUTABLE), str(READER_SCRIPT), "login"],
                 cwd=APP_DIR,
-                creationflags=subprocess.CREATE_NEW_PROCESS_GROUP if os.name == "nt" else 0,
+                creationflags=SUBPROCESS_CREATION_FLAGS,
             )
             self.sync_status_text.set("登录浏览器已打开。登录完成后请关闭该浏览器窗口。")
         except OSError as exc:
@@ -359,6 +364,7 @@ class QuotaGuardApp:
                 text=True,
                 timeout=45,
                 check=False,
+                creationflags=SUBPROCESS_CREATION_FLAGS,
             )
             if result.returncode != 0:
                 raise RuntimeError(result.stderr.strip() or "网页额度同步失败。")
