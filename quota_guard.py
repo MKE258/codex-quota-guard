@@ -18,9 +18,10 @@ from tkinter import filedialog, messagebox, ttk
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
 STATE_FILE = APP_DIR / "quota_guard_state.json"
 CHECK_INTERVAL_MS = 1000
-AUTO_SYNC_INTERVAL_SECONDS = 300
 READER_SCRIPT = APP_DIR / "codex_usage_reader.js"
 NODE_EXECUTABLE = APP_DIR / "node.exe" if (APP_DIR / "node.exe").exists() else "node"
+SYNC_INTERVAL_OPTIONS = (5, 15, 30, 60)
+PAUSE_POLICIES = ("仅提醒", "提醒后停止", "立即停止")
 
 
 def parse_datetime(value: str) -> datetime:
@@ -42,6 +43,9 @@ class QuotaState:
     today_used: float = 0.0
     auto_sync: bool = False
     last_sync_at: str = ""
+    monitor_only: bool = True
+    sync_interval_minutes: int = 5
+    pause_policy: str = "仅提醒"
 
     @classmethod
     def load(cls) -> "QuotaState":
@@ -131,7 +135,7 @@ class QuotaGuardApp:
     def __init__(self, root: tk.Tk) -> None:
         self.root = root
         self.root.title("项目额度守卫")
-        self.root.geometry("720x730")
+        self.root.geometry("760x830")
         self.state = QuotaState.load()
         self.controller = QuotaController(self.state)
         self.process: subprocess.Popen[str] | None = None
@@ -143,11 +147,17 @@ class QuotaGuardApp:
         self.refresh_var = tk.StringVar(value=self.state.refresh_at)
         self.usage_var = tk.StringVar()
         self.auto_sync_var = tk.BooleanVar(value=self.state.auto_sync)
+        self.monitor_only_var = tk.BooleanVar(value=self.state.monitor_only)
+        self.sync_interval_var = tk.StringVar(value=str(self.state.sync_interval_minutes))
+        self.pause_policy_var = tk.StringVar(value=self.state.pause_policy)
         self.sync_status_text = tk.StringVar(value="Codex 网页额度尚未同步")
+        self.mode_text = tk.StringVar()
         self.next_auto_sync = 0.0
         self.sync_in_progress = False
+        self.warned_levels: set[int] = set()
 
         self._build_ui()
+        self._update_mode()
         self._tick()
 
     def _build_ui(self) -> None:
@@ -155,68 +165,94 @@ class QuotaGuardApp:
         main.pack(fill=tk.BOTH, expand=True)
         main.columnconfigure(1, weight=1)
 
-        ttk.Label(main, text="项目启动命令").grid(row=0, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main, textvariable=self.command_var).grid(
-            row=0, column=1, columnspan=2, sticky=tk.EW, pady=5
+        ttk.Checkbutton(
+            main, text="仅监控额度，不启动或停止本地项目", variable=self.monitor_only_var,
+            command=self._update_mode,
+        ).grid(row=0, column=0, columnspan=3, sticky=tk.W, pady=(0, 8))
+        ttk.Label(main, textvariable=self.mode_text).grid(
+            row=1, column=0, columnspan=3, sticky=tk.W, pady=(0, 6)
         )
 
-        ttk.Label(main, text="项目目录").grid(row=1, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main, textvariable=self.project_dir_var).grid(
-            row=1, column=1, sticky=tk.EW, pady=5
-        )
-        ttk.Button(main, text="选择", command=self._choose_dir).grid(
-            row=1, column=2, padx=(8, 0), pady=5
-        )
-
-        ttk.Label(main, text="当前剩余额度 (%)").grid(row=2, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main, textvariable=self.remaining_var).grid(
+        ttk.Label(main, text="项目启动命令").grid(row=2, column=0, sticky=tk.W, pady=5)
+        self.command_entry = ttk.Entry(main, textvariable=self.command_var)
+        self.command_entry.grid(
             row=2, column=1, columnspan=2, sticky=tk.EW, pady=5
         )
 
-        ttk.Label(main, text="下次刷新时间").grid(row=3, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main, textvariable=self.refresh_var).grid(
-            row=3, column=1, columnspan=2, sticky=tk.EW, pady=5
+        ttk.Label(main, text="项目目录").grid(row=3, column=0, sticky=tk.W, pady=5)
+        self.project_dir_entry = ttk.Entry(main, textvariable=self.project_dir_var)
+        self.project_dir_entry.grid(
+            row=3, column=1, sticky=tk.EW, pady=5
         )
-        ttk.Label(main, text="格式：2026-06-08 22:00").grid(
-            row=4, column=1, columnspan=2, sticky=tk.W
+        self.choose_dir_button = ttk.Button(main, text="选择", command=self._choose_dir)
+        self.choose_dir_button.grid(
+            row=3, column=2, padx=(8, 0), pady=5
+        )
+
+        ttk.Label(main, text="当前剩余额度 (%)").grid(row=4, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main, textvariable=self.remaining_var).grid(
+            row=4, column=1, columnspan=2, sticky=tk.EW, pady=5
+        )
+
+        ttk.Label(main, text="下次刷新时间").grid(row=5, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main, textvariable=self.refresh_var).grid(
+            row=5, column=1, columnspan=2, sticky=tk.EW, pady=5
+        )
+        ttk.Label(main, text="格式示例：年-月-日 时:分，例如 2026-06-08 22:00").grid(
+            row=6, column=1, columnspan=2, sticky=tk.W
         )
 
         ttk.Checkbutton(
-            main, text="每 5 分钟自动同步 Codex 网页额度", variable=self.auto_sync_var
-        ).grid(row=5, column=0, columnspan=3, sticky=tk.W, pady=(12, 3))
+            main, text="自动同步 Codex 网页额度", variable=self.auto_sync_var
+        ).grid(row=7, column=0, sticky=tk.W, pady=(12, 3))
+        ttk.Label(main, text="同步间隔（分钟）").grid(row=7, column=1, sticky=tk.E, pady=(12, 3))
+        ttk.Combobox(
+            main, textvariable=self.sync_interval_var,
+            values=tuple(str(value) for value in SYNC_INTERVAL_OPTIONS),
+            state="readonly", width=5,
+        ).grid(row=7, column=2, sticky=tk.W, padx=(8, 0), pady=(12, 3))
         ttk.Button(main, text="登录 Codex 网页", command=self._login_codex).grid(
-            row=6, column=0, sticky=tk.W, pady=5
+            row=8, column=0, sticky=tk.W, pady=5
         )
         ttk.Button(main, text="立即同步网页额度", command=self._sync_codex).grid(
-            row=6, column=1, sticky=tk.W, pady=5
+            row=8, column=1, sticky=tk.W, pady=5
         )
         ttk.Label(main, textvariable=self.sync_status_text).grid(
-            row=7, column=0, columnspan=3, sticky=tk.W, pady=(2, 8)
+            row=9, column=0, columnspan=3, sticky=tk.W, pady=(2, 8)
         )
 
         ttk.Button(main, text="保存设置", command=self._save_settings).grid(
-            row=8, column=0, sticky=tk.W, pady=(8, 10)
+            row=10, column=0, sticky=tk.W, pady=(8, 10)
         )
-        ttk.Button(main, text="启动项目", command=self._start_project).grid(
-            row=8, column=1, sticky=tk.W, pady=(8, 10)
+        self.start_button = ttk.Button(main, text="启动项目", command=self._start_project)
+        self.start_button.grid(
+            row=10, column=1, sticky=tk.W, pady=(8, 10)
         )
-        ttk.Button(main, text="停止项目", command=self._stop_project).grid(
-            row=8, column=2, sticky=tk.E, pady=(8, 10)
+        self.stop_button = ttk.Button(main, text="停止项目", command=self._stop_project)
+        self.stop_button.grid(
+            row=10, column=2, sticky=tk.E, pady=(8, 10)
         )
 
-        ttk.Separator(main).grid(row=9, column=0, columnspan=3, sticky=tk.EW, pady=8)
+        ttk.Label(main, text="达到今日上限时").grid(row=11, column=0, sticky=tk.W, pady=5)
+        self.pause_policy_combo = ttk.Combobox(
+            main, textvariable=self.pause_policy_var, values=PAUSE_POLICIES,
+            state="readonly", width=12,
+        )
+        self.pause_policy_combo.grid(row=11, column=1, sticky=tk.W, pady=5)
 
-        ttk.Label(main, text="手动登记本次消耗额度 (%)").grid(row=10, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main, textvariable=self.usage_var).grid(row=10, column=1, sticky=tk.EW, pady=5)
+        ttk.Separator(main).grid(row=12, column=0, columnspan=3, sticky=tk.EW, pady=8)
+
+        ttk.Label(main, text="手动登记本次消耗额度 (%)").grid(row=13, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main, textvariable=self.usage_var).grid(row=13, column=1, sticky=tk.EW, pady=5)
         ttk.Button(main, text="登记", command=self._log_usage).grid(
-            row=10, column=2, padx=(8, 0), pady=5
+            row=13, column=2, padx=(8, 0), pady=5
         )
 
         self.summary = ttk.Label(main, text="", justify=tk.LEFT)
-        self.summary.grid(row=11, column=0, columnspan=3, sticky=tk.W, pady=(18, 8))
+        self.summary.grid(row=14, column=0, columnspan=3, sticky=tk.W, pady=(18, 8))
 
         ttk.Label(main, textvariable=self.status_text).grid(
-            row=12, column=0, columnspan=3, sticky=tk.W, pady=8
+            row=15, column=0, columnspan=3, sticky=tk.W, pady=8
         )
 
         ttk.Label(
@@ -226,7 +262,21 @@ class QuotaGuardApp:
                 "自动同步失败时仍可手动登记。达到今日建议额度后，正在运行的项目会被自动结束。"
             ),
             wraplength=670,
-        ).grid(row=13, column=0, columnspan=3, sticky=tk.W, pady=(14, 0))
+        ).grid(row=16, column=0, columnspan=3, sticky=tk.W, pady=(14, 0))
+
+    def _update_mode(self) -> None:
+        monitor_only = self.monitor_only_var.get()
+        self.mode_text.set(f"当前模式：{'仅监控额度' if monitor_only else '项目守卫'}")
+        state = tk.DISABLED if monitor_only else tk.NORMAL
+        for widget in (
+            self.command_entry, self.project_dir_entry, self.choose_dir_button,
+            self.start_button, self.stop_button,
+        ):
+            widget.configure(state=state)
+        self.pause_policy_combo.configure(state=tk.DISABLED if monitor_only else "readonly")
+        self.state.monitor_only = monitor_only
+        if monitor_only:
+            self.status_text.set("仅监控额度，不管理本地项目")
 
     def _choose_dir(self) -> None:
         directory = filedialog.askdirectory()
@@ -234,13 +284,14 @@ class QuotaGuardApp:
             self.project_dir_var.set(directory)
 
     def _read_form(self) -> None:
+        monitor_only = self.monitor_only_var.get()
         command = self.command_var.get().strip()
         project_dir = self.project_dir_var.get().strip()
         remaining = float(self.remaining_var.get().strip())
         refresh_at = parse_datetime(self.refresh_var.get())
-        if not command:
+        if not monitor_only and not command:
             raise ValueError("请填写项目启动命令。")
-        if not project_dir or not Path(project_dir).is_dir():
+        if not monitor_only and (not project_dir or not Path(project_dir).is_dir()):
             raise ValueError("请选择有效的项目目录。")
         if not 0 <= remaining <= 100:
             raise ValueError("剩余额度必须在 0 到 100 之间。")
@@ -254,6 +305,9 @@ class QuotaGuardApp:
         self.state.refresh_at = format_datetime(refresh_at)
         self.state.remaining_quota = remaining
         self.state.auto_sync = self.auto_sync_var.get()
+        self.state.monitor_only = monitor_only
+        self.state.sync_interval_minutes = int(self.sync_interval_var.get())
+        self.state.pause_policy = self.pause_policy_var.get()
         if remaining_changed or refresh_changed or not self.state.day_key:
             self.state.day_key = datetime.now().date().isoformat()
             self.state.day_start_remaining = remaining
@@ -290,7 +344,7 @@ class QuotaGuardApp:
             return
         if not (APP_DIR / "node_modules" / "playwright-core").exists():
             self.sync_status_text.set("尚未安装浏览器读取组件")
-            self.next_auto_sync = time.monotonic() + AUTO_SYNC_INTERVAL_SECONDS
+            self.next_auto_sync = time.monotonic() + self._sync_interval_seconds()
             return
         self.sync_in_progress = True
         self.sync_status_text.set("正在同步 Codex 网页额度...")
@@ -328,20 +382,22 @@ class QuotaGuardApp:
             self.refresh_var.set(self.state.refresh_at)
             self._update_summary()
             self.sync_status_text.set(f"Codex 网页额度已同步：{self.state.last_sync_at}")
-            if self.controller.should_pause(now):
-                self._stop_project(automatic=True)
+            self._handle_usage_thresholds(now)
         except (OSError, TypeError, ValueError) as exc:
             self.sync_status_text.set(f"同步结果无法应用：{exc}")
         finally:
             self.sync_in_progress = False
-            self.next_auto_sync = time.monotonic() + AUTO_SYNC_INTERVAL_SECONDS
+            self.next_auto_sync = time.monotonic() + self._sync_interval_seconds()
 
     def _finish_sync_error(self, error: str) -> None:
         self.sync_in_progress = False
-        self.next_auto_sync = time.monotonic() + AUTO_SYNC_INTERVAL_SECONDS
+        self.next_auto_sync = time.monotonic() + self._sync_interval_seconds()
         self.sync_status_text.set(f"同步失败：{error}")
 
     def _start_project(self) -> None:
+        if self.monitor_only_var.get():
+            messagebox.showinfo("仅监控模式", "当前为仅监控额度模式，不会启动本地项目。")
+            return
         if self.process and self.process.poll() is None:
             messagebox.showinfo("项目已运行", "当前项目已经在运行。")
             return
@@ -399,8 +455,7 @@ class QuotaGuardApp:
             self.remaining_var.set(f"{self.state.remaining_quota:.2f}")
             self.usage_var.set("")
             self._update_summary()
-            if self.controller.should_pause(datetime.now()):
-                self._stop_project(automatic=True)
+            self._handle_usage_thresholds(datetime.now())
         except (OSError, ValueError) as exc:
             messagebox.showerror("无法登记", str(exc))
 
@@ -420,7 +475,9 @@ class QuotaGuardApp:
                     f"距离刷新剩余天数：{days}\n"
                     f"今日建议额度：{limit:.2f}%\n"
                     f"今日已使用：{self.state.today_used:.2f}%\n"
-                    f"今日还可使用：{available:.2f}%"
+                    f"今日还可使用：{available:.2f}%\n"
+                    f"最后同步时间：{self.state.last_sync_at or '尚未同步'}\n"
+                    f"下次自动同步：{self._next_sync_text()}"
                 )
             )
         except ValueError:
@@ -436,13 +493,41 @@ class QuotaGuardApp:
                 self.state.save()
                 self.remaining_var.set(f"{self.state.remaining_quota:.2f}")
                 self._update_summary()
-                if self.controller.should_pause(datetime.now()):
-                    self._stop_project(automatic=True)
+                self._handle_usage_thresholds(datetime.now())
             except (OSError, ValueError):
                 pass
         if self.auto_sync_var.get() and time.monotonic() >= self.next_auto_sync:
             self._sync_codex()
         self.root.after(CHECK_INTERVAL_MS, self._tick)
+
+    def _sync_interval_seconds(self) -> int:
+        return int(self.sync_interval_var.get()) * 60
+
+    def _next_sync_text(self) -> str:
+        if not self.auto_sync_var.get():
+            return "未开启"
+        seconds = max(0, math.ceil(self.next_auto_sync - time.monotonic()))
+        return f"约 {seconds // 60:02d}:{seconds % 60:02d} 后"
+
+    def _handle_usage_thresholds(self, now: datetime) -> None:
+        limit = self.controller.daily_limit(now)
+        available = max(0.0, limit - self.state.today_used)
+        ratio = 0.0 if limit <= 0 else available / limit
+        for level in (20, 10):
+            if ratio <= level / 100 and level not in self.warned_levels:
+                self.warned_levels.add(level)
+                messagebox.showwarning("额度预警", f"今日建议额度仅剩 {available:.2f}% 可用。")
+        if not self.controller.should_pause(now):
+            return
+        policy = self.pause_policy_var.get()
+        if policy == "仅提醒" or self.monitor_only_var.get():
+            if 0 not in self.warned_levels:
+                self.warned_levels.add(0)
+                messagebox.showwarning("今日额度已用完", "今日建议额度已达到上限。")
+            return
+        if policy == "提醒后停止":
+            messagebox.showwarning("项目即将停止", "今日建议额度已达到上限，项目将被停止。")
+        self._stop_project(automatic=True)
 
 
 def main() -> None:
