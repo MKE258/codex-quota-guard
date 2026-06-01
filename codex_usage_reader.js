@@ -16,6 +16,7 @@ function browserOptions(headless) {
     channel: "chrome",
     headless,
     viewport: { width: 1280, height: 900 },
+    args: headless ? [] : ["--window-position=-32000,-32000", "--window-size=1280,900"],
   };
 }
 
