@@ -8,8 +8,12 @@
 
 ## 安装版使用方法
 
-1. 双击 `CodexQuotaGuard-Setup-v1.0.0.exe`。
+1. 双击 `CodexQuotaGuard-Setup-v1.1.2.exe`。
 2. 完成安装后，从桌面或开始菜单打开 `Codex Quota Guard`。
+3. 点击“登录 Codex 网页”，登录自己的 ChatGPT 账号。
+4. 开启自动同步。
+
+换电脑后不需要复制旧电脑的登录目录。重新登录更安全。
 
 ## 免安装版使用方法
 
@@ -33,7 +37,7 @@
 
 自动同步间隔可以选择 `5 / 15 / 30 / 60` 分钟。界面会显示最后同步时间和距离下次自动同步的时间。
 
-额度页面地址为 `https://chatgpt.com/codex/settings/usage`。浏览器登录状态保存在当前 Windows 用户的 `%LOCALAPPDATA%\CodexQuotaGuard\browser-profile` 目录中，不会保存密码。
+额度页面地址为 `https://chatgpt.com/codex/settings/usage`。浏览器登录状态保存在当前 Windows 用户的 `%LOCALAPPDATA%\CodexQuotaGuard\browser-profile` 目录中，不会保存密码。应用设置保存在 `%LOCALAPPDATA%\CodexQuotaGuard\quota_guard_state.json`。
 
 达到当天建议额度后，工具会自动结束由它启动的项目进程树。网页无法读取时，也可以手动填写剩余额度、刷新时间，并登记消耗量。
 
@@ -50,4 +54,5 @@ Codex 套餐额度没有公开 API，因此自动同步依赖 Usage 网页。网
 - 工具不是 OpenAI 官方产品。
 - 工具不会要求输入或保存 ChatGPT 密码。
 - 登录状态仅保存在本机 `%LOCALAPPDATA%\CodexQuotaGuard\browser-profile`。
+- 应用设置仅保存在本机 `%LOCALAPPDATA%\CodexQuotaGuard\quota_guard_state.json`。
 - 不要把该浏览器目录发送给其他人。

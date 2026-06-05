@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
@@ -16,7 +17,20 @@ from tkinter import filedialog, messagebox, ttk
 
 
 APP_DIR = Path(sys.executable).resolve().parent if getattr(sys, "frozen", False) else Path(__file__).resolve().parent
-STATE_FILE = APP_DIR / "quota_guard_state.json"
+
+
+def resolve_state_file(app_dir: Path, environ: Mapping[str, str] | None = None) -> Path:
+    environ = os.environ if environ is None else environ
+    local_app_data = environ.get("LOCALAPPDATA")
+    if local_app_data:
+        return Path(local_app_data) / "CodexQuotaGuard" / "quota_guard_state.json"
+    if os.name == "nt":
+        return Path.home() / "AppData" / "Local" / "CodexQuotaGuard" / "quota_guard_state.json"
+    return Path.home() / ".config" / "CodexQuotaGuard" / "quota_guard_state.json"
+
+
+LEGACY_STATE_FILE = APP_DIR / "quota_guard_state.json"
+STATE_FILE = resolve_state_file(APP_DIR)
 CHECK_INTERVAL_MS = 1000
 READER_SCRIPT = APP_DIR / "codex_usage_reader.js"
 NODE_EXECUTABLE = APP_DIR / "node.exe" if (APP_DIR / "node.exe").exists() else "node"
@@ -54,14 +68,27 @@ class QuotaState:
 
     @classmethod
     def load(cls) -> "QuotaState":
-        if not STATE_FILE.exists():
+        return cls.load_from_files(STATE_FILE, LEGACY_STATE_FILE)
+
+    @classmethod
+    def load_from_files(cls, state_file: Path, legacy_state_file: Path) -> "QuotaState":
+        source_file = state_file if state_file.exists() else legacy_state_file
+        if not source_file.exists():
             return cls()
         try:
-            return cls(**json.loads(STATE_FILE.read_text(encoding="utf-8")))
+            state = cls(**json.loads(source_file.read_text(encoding="utf-8")))
         except (OSError, ValueError, TypeError):
             return cls()
+        if source_file == legacy_state_file and not state_file.exists():
+            try:
+                state_file.parent.mkdir(parents=True, exist_ok=True)
+                legacy_state_file.replace(state_file)
+            except OSError:
+                pass
+        return state
 
     def save(self) -> None:
+        STATE_FILE.parent.mkdir(parents=True, exist_ok=True)
         STATE_FILE.write_text(
             json.dumps(asdict(self), ensure_ascii=False, indent=2),
             encoding="utf-8",
@@ -332,7 +359,7 @@ class QuotaGuardApp:
 
     def _login_codex(self) -> None:
         if not (APP_DIR / "node_modules" / "playwright-core").exists():
-            messagebox.showerror("缺少组件", "请先双击“安装浏览器读取组件.bat”。")
+            messagebox.showerror("缺少组件", "请先双击 install_browser_reader.bat。")
             return
         try:
             subprocess.Popen(

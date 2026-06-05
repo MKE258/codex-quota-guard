@@ -68,6 +68,14 @@ function extractResetAt(block) {
   return Number.isNaN(parsed.getTime()) ? null : parsed.toISOString();
 }
 
+function parseUsageText(text) {
+  const block = findWeeklyBlock(text);
+  return {
+    remainingQuota: extractRemaining(block),
+    refreshAt: extractResetAt(block),
+  };
+}
+
 async function login() {
   const candidates = [
     path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
@@ -101,15 +109,15 @@ async function fetchUsage() {
     if (/log in|sign in|登录|登入/i.test(text) && !/weekly usage limit|每周(?:使用)?(?:额度|限制|限额)/i.test(text)) {
       throw new Error("登录状态已失效，请点击“登录 Codex 网页”重新登录。");
     }
-    let block;
+    let usage;
     try {
-      block = findWeeklyBlock(text);
+      usage = parseUsageText(text);
     } catch (error) {
       throw new Error(`${error.message} 当前页面：${page.url()}，文本长度：${text.length}`);
     }
     console.log(JSON.stringify({
-      remainingQuota: extractRemaining(block),
-      refreshAt: extractResetAt(block),
+      remainingQuota: usage.remainingQuota,
+      refreshAt: usage.refreshAt,
       checkedAt: new Date().toISOString(),
     }));
   } finally {
@@ -117,18 +125,24 @@ async function fetchUsage() {
   }
 }
 
-const command = process.argv[2];
-if (command === "login") {
-  login().catch((error) => {
-    console.error(error.message);
+if (require.main === module) {
+  const command = process.argv[2];
+  if (command === "login") {
+    login().catch((error) => {
+      console.error(error.message);
+      process.exit(1);
+    });
+  } else if (command === "fetch") {
+    fetchUsage().catch((error) => {
+      console.error(error.message);
+      process.exit(1);
+    });
+  } else {
+    console.error("用法: node codex_usage_reader.js login|fetch");
     process.exit(1);
-  });
-} else if (command === "fetch") {
-  fetchUsage().catch((error) => {
-    console.error(error.message);
-    process.exit(1);
-  });
-} else {
-  console.error("用法: node codex_usage_reader.js login|fetch");
-  process.exit(1);
+  }
 }
+
+module.exports = {
+  parseUsageText,
+};

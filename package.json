@@ -1,7 +1,10 @@
 {
   "name": "codex-quota-guard",
   "private": true,
-  "version": "1.0.0",
+  "version": "1.1.2",
+  "scripts": {
+    "test:usage-reader": "node test_usage_reader.js"
+  },
   "dependencies": {
     "playwright-core": "1.60.0"
   }

@@ -18,6 +18,7 @@ Run tests:
 
 ```powershell
 python -m unittest -v
+node test_usage_reader.js
 node --check codex_usage_reader.js
 ```
 
@@ -45,3 +46,6 @@ For a portable distribution, place these files beside `CodexQuotaGuard.exe`:
 - `THIRD_PARTY_NOTICES.txt`
 
 The published GitHub Release contains prebuilt Windows packages.
+
+If a portable package does not include `node_modules`, run `install_browser_reader.bat`
+once in the extracted directory before using web sync.

@@ -1,10 +1,42 @@
 import unittest
 from datetime import datetime
+from pathlib import Path
+from tempfile import TemporaryDirectory
 
-from quota_guard import QuotaController, QuotaState
+from quota_guard import QuotaController, QuotaState, resolve_state_file
 
 
 class QuotaControllerTest(unittest.TestCase):
+    def test_state_file_prefers_local_app_data_directory(self) -> None:
+        app_dir = Path("C:/Program Files/CodexQuotaGuard")
+        state_file = resolve_state_file(
+            app_dir,
+            {"LOCALAPPDATA": "C:/Users/Admin/AppData/Local"},
+        )
+
+        self.assertEqual(
+            state_file,
+            Path("C:/Users/Admin/AppData/Local/CodexQuotaGuard/quota_guard_state.json"),
+        )
+
+    def test_state_load_migrates_legacy_state_file(self) -> None:
+        with TemporaryDirectory() as temp_dir:
+            app_dir = Path(temp_dir) / "app"
+            data_dir = Path(temp_dir) / "local" / "CodexQuotaGuard"
+            app_dir.mkdir()
+            legacy_file = app_dir / "quota_guard_state.json"
+            state_file = data_dir / "quota_guard_state.json"
+            legacy_file.write_text(
+                '{"remaining_quota": 42, "refresh_at": "2026-06-08 12:00"}',
+                encoding="utf-8",
+            )
+
+            state = QuotaState.load_from_files(state_file, legacy_file)
+
+            self.assertEqual(state.remaining_quota, 42)
+            self.assertTrue(state_file.exists())
+            self.assertFalse(legacy_file.exists())
+
     def test_daily_limit_uses_remaining_quota_divided_by_remaining_days(self) -> None:
         state = QuotaState(
             remaining_quota=70,
