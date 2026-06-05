@@ -76,6 +76,17 @@ function parseUsageText(text) {
   };
 }
 
+function describePageBlocker(title, text, html) {
+  const haystack = `${title}\n${text}\n${html}`;
+  if (/请稍候|just a moment|verify you are human|验证您是真人|cloudflare/i.test(haystack)) {
+    return "页面正在等待 Cloudflare 真人验证。请点击“登录 Codex 网页”，在弹出的浏览器中完成验证并确认能看到 Usage 页面，然后再同步。";
+  }
+  if (/log in|sign in|登录|登入/i.test(text) && !/weekly usage limit|每周(?:使用)?(?:额度|限制|限额)/i.test(text)) {
+    return "登录状态已失效，请点击“登录 Codex 网页”重新登录。";
+  }
+  return null;
+}
+
 async function login() {
   const candidates = [
     path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
@@ -105,9 +116,12 @@ async function fetchUsage() {
     const page = pages[0] || await context.newPage();
     await page.goto(USAGE_URL, { waitUntil: "domcontentloaded", timeout: 30000 });
     await page.waitForTimeout(6000);
+    const title = await page.title();
     const text = await page.locator("body").innerText();
-    if (/log in|sign in|登录|登入/i.test(text) && !/weekly usage limit|每周(?:使用)?(?:额度|限制|限额)/i.test(text)) {
-      throw new Error("登录状态已失效，请点击“登录 Codex 网页”重新登录。");
+    const html = text ? "" : await page.content();
+    const blocker = describePageBlocker(title, text, html);
+    if (blocker) {
+      throw new Error(blocker);
     }
     let usage;
     try {
@@ -144,5 +158,6 @@ if (require.main === module) {
 }
 
 module.exports = {
+  describePageBlocker,
   parseUsageText,
 };
