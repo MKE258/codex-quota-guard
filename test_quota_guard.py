@@ -7,12 +7,19 @@ from quota_guard import (
     QuotaController,
     QuotaState,
     format_process_error,
+    login_status_text,
     reader_env,
     resolve_state_file,
 )
 
 
 class QuotaControllerTest(unittest.TestCase):
+    def test_login_status_text_mentions_system_chrome_when_enabled(self) -> None:
+        self.assertEqual(
+            login_status_text(True),
+            "已用系统浏览器打开 Usage 页面。登录完成并看到额度后，请关闭普通 Chrome 再同步。",
+        )
+
     def test_reader_env_enables_system_chrome_profile(self) -> None:
         env = reader_env(True, {"PATH": "example"})
 

@@ -8,6 +8,7 @@ import subprocess
 import sys
 import threading
 import time
+import webbrowser
 from collections.abc import Mapping
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta
@@ -62,6 +63,12 @@ def reader_env(use_system_chrome_profile: bool, environ: Mapping[str, str] | Non
     else:
         env.pop("CODEX_QUOTA_GUARD_PROFILE_MODE", None)
     return env
+
+
+def login_status_text(use_system_chrome_profile: bool) -> str:
+    if use_system_chrome_profile:
+        return "已用系统浏览器打开 Usage 页面。登录完成并看到额度后，请关闭普通 Chrome 再同步。"
+    return "登录浏览器已打开。登录完成后请关闭该浏览器窗口。"
 
 
 @dataclass
@@ -383,6 +390,10 @@ class QuotaGuardApp:
         return reader_env(self.use_system_chrome_profile_var.get())
 
     def _login_codex(self) -> None:
+        if self.use_system_chrome_profile_var.get():
+            webbrowser.open("https://chatgpt.com/codex/settings/usage")
+            self.sync_status_text.set(login_status_text(True))
+            return
         if not (APP_DIR / "node_modules" / "playwright-core").exists():
             messagebox.showerror("缺少组件", "请先双击 install_browser_reader.bat。")
             return
@@ -393,7 +404,7 @@ class QuotaGuardApp:
                 env=self._reader_env(),
                 creationflags=SUBPROCESS_CREATION_FLAGS,
             )
-            self.sync_status_text.set("登录浏览器已打开。登录完成后请关闭该浏览器窗口。")
+            self.sync_status_text.set(login_status_text(False))
         except OSError as exc:
             messagebox.showerror("无法打开浏览器", str(exc))
 
