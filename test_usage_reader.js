@@ -1,5 +1,10 @@
 const assert = require("assert");
-const { describePageBlocker, parseUsageText } = require("./codex_usage_reader.js");
+const {
+  describeLaunchError,
+  describePageBlocker,
+  parseUsageText,
+  resolveProfileDir,
+} = require("./codex_usage_reader.js");
 
 const englishText = `
 Account
@@ -26,4 +31,17 @@ assert.strictEqual(chineseUsage.refreshAt, new Date(2026, 5, 8, 12, 0).toISOStri
 assert.strictEqual(
   describePageBlocker("请稍候…", "", "<title>请稍候…</title><div>请验证您是真人</div>"),
   "页面正在等待 Cloudflare 真人验证。请点击“登录 Codex 网页”，在弹出的浏览器中完成验证并确认能看到 Usage 页面，然后再同步。"
+);
+
+assert.strictEqual(
+  resolveProfileDir(
+    { CODEX_QUOTA_GUARD_PROFILE_MODE: "system-chrome", LOCALAPPDATA: "C:\\Users\\Admin\\AppData\\Local" },
+    "win32"
+  ),
+  "C:\\Users\\Admin\\AppData\\Local\\Google\\Chrome\\User Data"
+);
+
+assert.strictEqual(
+  describeLaunchError(new Error("Failed to create a ProcessSingleton for your profile directory")),
+  "系统 Chrome 登录目录正在被 Chrome 使用。请先关闭所有普通 Chrome 窗口，再点击“立即同步网页额度”。"
 );

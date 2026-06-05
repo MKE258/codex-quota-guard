@@ -3,10 +3,27 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from quota_guard import QuotaController, QuotaState, format_process_error, resolve_state_file
+from quota_guard import (
+    QuotaController,
+    QuotaState,
+    format_process_error,
+    reader_env,
+    resolve_state_file,
+)
 
 
 class QuotaControllerTest(unittest.TestCase):
+    def test_reader_env_enables_system_chrome_profile(self) -> None:
+        env = reader_env(True, {"PATH": "example"})
+
+        self.assertEqual(env["CODEX_QUOTA_GUARD_PROFILE_MODE"], "system-chrome")
+        self.assertEqual(env["PATH"], "example")
+
+    def test_reader_env_removes_system_chrome_profile_when_disabled(self) -> None:
+        env = reader_env(False, {"CODEX_QUOTA_GUARD_PROFILE_MODE": "system-chrome"})
+
+        self.assertNotIn("CODEX_QUOTA_GUARD_PROFILE_MODE", env)
+
     def test_process_error_falls_back_when_stderr_is_missing(self) -> None:
         self.assertEqual(
             format_process_error(None, "网页同步失败\n"),

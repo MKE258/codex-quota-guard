@@ -55,6 +55,15 @@ def format_process_error(stderr: str | None, stdout: str | None) -> str:
     return (stderr or stdout or "网页额度同步失败。").strip() or "网页额度同步失败。"
 
 
+def reader_env(use_system_chrome_profile: bool, environ: Mapping[str, str] | None = None) -> dict[str, str]:
+    env = dict(os.environ if environ is None else environ)
+    if use_system_chrome_profile:
+        env["CODEX_QUOTA_GUARD_PROFILE_MODE"] = "system-chrome"
+    else:
+        env.pop("CODEX_QUOTA_GUARD_PROFILE_MODE", None)
+    return env
+
+
 @dataclass
 class QuotaState:
     command: str = ""
@@ -69,6 +78,7 @@ class QuotaState:
     monitor_only: bool = True
     sync_interval_minutes: int = 5
     pause_policy: str = "仅提醒"
+    use_system_chrome_profile: bool = False
 
     @classmethod
     def load(cls) -> "QuotaState":
@@ -183,6 +193,7 @@ class QuotaGuardApp:
         self.refresh_var = tk.StringVar(value=self.state.refresh_at)
         self.usage_var = tk.StringVar()
         self.auto_sync_var = tk.BooleanVar(value=self.state.auto_sync)
+        self.use_system_chrome_profile_var = tk.BooleanVar(value=self.state.use_system_chrome_profile)
         self.monitor_only_var = tk.BooleanVar(value=self.state.monitor_only)
         self.sync_interval_var = tk.StringVar(value=str(self.state.sync_interval_minutes))
         self.pause_policy_var = tk.StringVar(value=self.state.pause_policy)
@@ -253,52 +264,58 @@ class QuotaGuardApp:
         ttk.Button(main, text="立即同步网页额度", command=self._sync_codex).grid(
             row=8, column=1, sticky=tk.W, pady=5
         )
+        ttk.Checkbutton(
+            main,
+            text="使用系统 Chrome 登录状态（同步前请关闭普通 Chrome）",
+            variable=self.use_system_chrome_profile_var,
+        ).grid(row=9, column=0, columnspan=3, sticky=tk.W, pady=(2, 4))
         ttk.Label(main, textvariable=self.sync_status_text).grid(
-            row=9, column=0, columnspan=3, sticky=tk.W, pady=(2, 8)
+            row=10, column=0, columnspan=3, sticky=tk.W, pady=(2, 8)
         )
 
         ttk.Button(main, text="保存设置", command=self._save_settings).grid(
-            row=10, column=0, sticky=tk.W, pady=(8, 10)
+            row=11, column=0, sticky=tk.W, pady=(8, 10)
         )
         self.start_button = ttk.Button(main, text="启动项目", command=self._start_project)
         self.start_button.grid(
-            row=10, column=1, sticky=tk.W, pady=(8, 10)
+            row=11, column=1, sticky=tk.W, pady=(8, 10)
         )
         self.stop_button = ttk.Button(main, text="停止项目", command=self._stop_project)
         self.stop_button.grid(
-            row=10, column=2, sticky=tk.E, pady=(8, 10)
+            row=11, column=2, sticky=tk.E, pady=(8, 10)
         )
 
-        ttk.Label(main, text="达到今日上限时").grid(row=11, column=0, sticky=tk.W, pady=5)
+        ttk.Label(main, text="达到今日上限时").grid(row=12, column=0, sticky=tk.W, pady=5)
         self.pause_policy_combo = ttk.Combobox(
             main, textvariable=self.pause_policy_var, values=PAUSE_POLICIES,
             state="readonly", width=12,
         )
-        self.pause_policy_combo.grid(row=11, column=1, sticky=tk.W, pady=5)
+        self.pause_policy_combo.grid(row=12, column=1, sticky=tk.W, pady=5)
 
-        ttk.Separator(main).grid(row=12, column=0, columnspan=3, sticky=tk.EW, pady=8)
+        ttk.Separator(main).grid(row=13, column=0, columnspan=3, sticky=tk.EW, pady=8)
 
-        ttk.Label(main, text="手动登记本次消耗额度 (%)").grid(row=13, column=0, sticky=tk.W, pady=5)
-        ttk.Entry(main, textvariable=self.usage_var).grid(row=13, column=1, sticky=tk.EW, pady=5)
+        ttk.Label(main, text="手动登记本次消耗额度 (%)").grid(row=14, column=0, sticky=tk.W, pady=5)
+        ttk.Entry(main, textvariable=self.usage_var).grid(row=14, column=1, sticky=tk.EW, pady=5)
         ttk.Button(main, text="登记", command=self._log_usage).grid(
-            row=13, column=2, padx=(8, 0), pady=5
+            row=14, column=2, padx=(8, 0), pady=5
         )
 
         self.summary = ttk.Label(main, text="", justify=tk.LEFT)
-        self.summary.grid(row=14, column=0, columnspan=3, sticky=tk.W, pady=(18, 8))
+        self.summary.grid(row=15, column=0, columnspan=3, sticky=tk.W, pady=(18, 8))
 
         ttk.Label(main, textvariable=self.status_text).grid(
-            row=15, column=0, columnspan=3, sticky=tk.W, pady=8
+            row=16, column=0, columnspan=3, sticky=tk.W, pady=8
         )
 
         ttk.Label(
             main,
             text=(
-                "说明：网页登录状态保存在本机独立浏览器目录中，不保存密码。"
-                "自动同步失败时仍可手动登记。达到今日建议额度后，正在运行的项目会被自动结束。"
+                "说明：默认网页登录状态保存在本机独立浏览器目录中，不保存密码。"
+                "如使用系统 Chrome 登录状态，工具会读取普通 Chrome 的登录目录；同步前需关闭普通 Chrome。"
+                "自动同步失败时仍可手动登记。"
             ),
             wraplength=670,
-        ).grid(row=16, column=0, columnspan=3, sticky=tk.W, pady=(14, 0))
+        ).grid(row=17, column=0, columnspan=3, sticky=tk.W, pady=(14, 0))
 
     def _update_mode(self) -> None:
         monitor_only = self.monitor_only_var.get()
@@ -341,6 +358,7 @@ class QuotaGuardApp:
         self.state.refresh_at = format_datetime(refresh_at)
         self.state.remaining_quota = remaining
         self.state.auto_sync = self.auto_sync_var.get()
+        self.state.use_system_chrome_profile = self.use_system_chrome_profile_var.get()
         self.state.monitor_only = monitor_only
         self.state.sync_interval_minutes = int(self.sync_interval_var.get())
         self.state.pause_policy = self.pause_policy_var.get()
@@ -361,6 +379,9 @@ class QuotaGuardApp:
             messagebox.showerror("无法保存", str(exc))
             return False
 
+    def _reader_env(self) -> dict[str, str]:
+        return reader_env(self.use_system_chrome_profile_var.get())
+
     def _login_codex(self) -> None:
         if not (APP_DIR / "node_modules" / "playwright-core").exists():
             messagebox.showerror("缺少组件", "请先双击 install_browser_reader.bat。")
@@ -369,6 +390,7 @@ class QuotaGuardApp:
             subprocess.Popen(
                 [str(NODE_EXECUTABLE), str(READER_SCRIPT), "login"],
                 cwd=APP_DIR,
+                env=self._reader_env(),
                 creationflags=SUBPROCESS_CREATION_FLAGS,
             )
             self.sync_status_text.set("登录浏览器已打开。登录完成后请关闭该浏览器窗口。")
@@ -391,6 +413,7 @@ class QuotaGuardApp:
             result = subprocess.run(
                 [str(NODE_EXECUTABLE), str(READER_SCRIPT), "fetch"],
                 cwd=APP_DIR,
+                env=self._reader_env(),
                 capture_output=True,
                 text=True,
                 encoding="utf-8",
@@ -416,6 +439,7 @@ class QuotaGuardApp:
             self.controller.sync_remote_usage(float(data["remainingQuota"]), refresh_at, now)
             self.state.last_sync_at = format_datetime(now)
             self.state.auto_sync = self.auto_sync_var.get()
+            self.state.use_system_chrome_profile = self.use_system_chrome_profile_var.get()
             self.state.save()
             self.remaining_var.set(f"{self.state.remaining_quota:.2f}")
             self.refresh_var.set(self.state.refresh_at)

@@ -5,11 +5,37 @@ const { spawn } = require("child_process");
 const { chromium } = require("playwright-core");
 
 const USAGE_URL = "https://chatgpt.com/codex/settings/usage";
-const PROFILE_DIR = path.join(
-  process.env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
-  "CodexQuotaGuard",
-  "browser-profile"
-);
+const USE_SYSTEM_CHROME_PROFILE = process.env.CODEX_QUOTA_GUARD_PROFILE_MODE === "system-chrome";
+
+function appProfileDir(env = process.env) {
+  return path.join(
+    env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"),
+    "CodexQuotaGuard",
+    "browser-profile"
+  );
+}
+
+function systemChromeProfileDir(env = process.env, platform = process.platform) {
+  if (platform === "win32") {
+    return path.join(env.LOCALAPPDATA || path.join(os.homedir(), "AppData", "Local"), "Google", "Chrome", "User Data");
+  }
+  if (platform === "darwin") {
+    return path.join(os.homedir(), "Library", "Application Support", "Google", "Chrome");
+  }
+  return path.join(os.homedir(), ".config", "google-chrome");
+}
+
+function resolveProfileDir(env = process.env, platform = process.platform) {
+  if (env.CODEX_QUOTA_GUARD_PROFILE_DIR) {
+    return env.CODEX_QUOTA_GUARD_PROFILE_DIR;
+  }
+  if (env.CODEX_QUOTA_GUARD_PROFILE_MODE === "system-chrome") {
+    return systemChromeProfileDir(env, platform);
+  }
+  return appProfileDir(env);
+}
+
+const PROFILE_DIR = resolveProfileDir();
 
 function browserOptions(headless) {
   return {
@@ -24,6 +50,13 @@ async function launch(headless) {
   try {
     return await chromium.launchPersistentContext(PROFILE_DIR, browserOptions(headless));
   } catch (error) {
+    const message = describeLaunchError(error);
+    if (message) {
+      throw new Error(message);
+    }
+    if (USE_SYSTEM_CHROME_PROFILE) {
+      throw error;
+    }
     return chromium.launchPersistentContext(PROFILE_DIR, {
       ...browserOptions(headless),
       channel: "msedge",
@@ -87,21 +120,32 @@ function describePageBlocker(title, text, html) {
   return null;
 }
 
+function describeLaunchError(error) {
+  const message = String(error && error.message ? error.message : error);
+  if (/ProcessSingleton|profile.*in use|user data directory is already in use|正在使用/i.test(message)) {
+    return "系统 Chrome 登录目录正在被 Chrome 使用。请先关闭所有普通 Chrome 窗口，再点击“立即同步网页额度”。";
+  }
+  return null;
+}
+
 async function login() {
-  const candidates = [
+  const chromeCandidates = [
     path.join(process.env.PROGRAMFILES || "", "Google", "Chrome", "Application", "chrome.exe"),
+  ];
+  const browserCandidates = [
+    ...chromeCandidates,
     path.join(process.env["PROGRAMFILES(X86)"] || "", "Microsoft", "Edge", "Application", "msedge.exe"),
     path.join(process.env.PROGRAMFILES || "", "Microsoft", "Edge", "Application", "msedge.exe"),
   ];
+  const candidates = USE_SYSTEM_CHROME_PROFILE ? chromeCandidates : browserCandidates;
   const executable = candidates.find((candidate) => fs.existsSync(candidate));
   if (!executable) {
-    throw new Error("未找到 Chrome 或 Edge。");
+    throw new Error(USE_SYSTEM_CHROME_PROFILE ? "未找到 Google Chrome。" : "未找到 Chrome 或 Edge。");
   }
-  const browser = spawn(executable, [
-    `--user-data-dir=${PROFILE_DIR}`,
-    "--no-first-run",
-    USAGE_URL,
-  ], { stdio: "ignore" });
+  const args = USE_SYSTEM_CHROME_PROFILE
+    ? ["--no-first-run", USAGE_URL]
+    : [`--user-data-dir=${PROFILE_DIR}`, "--no-first-run", USAGE_URL];
+  const browser = spawn(executable, args, { stdio: "ignore" });
   console.log("请在浏览器中登录并确认能看到 Codex Usage 页面。完成后关闭浏览器窗口。");
   await new Promise((resolve, reject) => {
     browser.on("error", reject);
@@ -158,6 +202,8 @@ if (require.main === module) {
 }
 
 module.exports = {
+  describeLaunchError,
   describePageBlocker,
   parseUsageText,
+  resolveProfileDir,
 };
