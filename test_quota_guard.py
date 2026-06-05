@@ -3,10 +3,22 @@ from datetime import datetime
 from pathlib import Path
 from tempfile import TemporaryDirectory
 
-from quota_guard import QuotaController, QuotaState, resolve_state_file
+from quota_guard import QuotaController, QuotaState, format_process_error, resolve_state_file
 
 
 class QuotaControllerTest(unittest.TestCase):
+    def test_process_error_falls_back_when_stderr_is_missing(self) -> None:
+        self.assertEqual(
+            format_process_error(None, "网页同步失败\n"),
+            "网页同步失败",
+        )
+
+    def test_process_error_uses_default_when_no_output_exists(self) -> None:
+        self.assertEqual(
+            format_process_error(None, None),
+            "网页额度同步失败。",
+        )
+
     def test_state_file_prefers_local_app_data_directory(self) -> None:
         app_dir = Path("C:/Program Files/CodexQuotaGuard")
         state_file = resolve_state_file(

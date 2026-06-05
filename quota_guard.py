@@ -51,6 +51,10 @@ def format_datetime(value: datetime) -> str:
     return value.strftime("%Y-%m-%d %H:%M")
 
 
+def format_process_error(stderr: str | None, stdout: str | None) -> str:
+    return (stderr or stdout or "网页额度同步失败。").strip() or "网页额度同步失败。"
+
+
 @dataclass
 class QuotaState:
     command: str = ""
@@ -389,12 +393,14 @@ class QuotaGuardApp:
                 cwd=APP_DIR,
                 capture_output=True,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
                 timeout=45,
                 check=False,
                 creationflags=SUBPROCESS_CREATION_FLAGS,
             )
             if result.returncode != 0:
-                raise RuntimeError(result.stderr.strip() or "网页额度同步失败。")
+                raise RuntimeError(format_process_error(result.stderr, result.stdout))
             data = json.loads(result.stdout.strip())
             self.root.after(0, self._apply_codex_usage, data)
         except (OSError, ValueError, RuntimeError, subprocess.TimeoutExpired) as exc:
