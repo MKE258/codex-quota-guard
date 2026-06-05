@@ -7,6 +7,7 @@ from quota_guard import (
     QuotaController,
     QuotaState,
     format_process_error,
+    format_sync_status_error,
     login_status_text,
     reader_env,
     resolve_state_file,
@@ -14,6 +15,16 @@ from quota_guard import (
 
 
 class QuotaControllerTest(unittest.TestCase):
+    def test_format_sync_status_error_truncates_long_browser_logs(self) -> None:
+        error = "browserType.launchPersistentContext: Target page, context or browser has been closed\n" + (
+            "Browser logs:\nline\n" * 30
+        )
+
+        message = format_sync_status_error(error)
+
+        self.assertLessEqual(len(message), 260)
+        self.assertIn("同步失败：browserType.launchPersistentContext", message)
+
     def test_login_status_text_mentions_system_chrome_when_enabled(self) -> None:
         self.assertEqual(
             login_status_text(True),

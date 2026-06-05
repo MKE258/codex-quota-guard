@@ -56,6 +56,13 @@ def format_process_error(stderr: str | None, stdout: str | None) -> str:
     return (stderr or stdout or "网页额度同步失败。").strip() or "网页额度同步失败。"
 
 
+def format_sync_status_error(error: str, limit: int = 240) -> str:
+    compact = " ".join(error.split())
+    if len(compact) > limit:
+        compact = compact[: limit - 1].rstrip() + "…"
+    return f"同步失败：{compact}"
+
+
 def reader_env(use_system_chrome_profile: bool, environ: Mapping[str, str] | None = None) -> dict[str, str]:
     env = dict(os.environ if environ is None else environ)
     if use_system_chrome_profile:
@@ -466,7 +473,7 @@ class QuotaGuardApp:
     def _finish_sync_error(self, error: str) -> None:
         self.sync_in_progress = False
         self.next_auto_sync = time.monotonic() + self._sync_interval_seconds()
-        self.sync_status_text.set(f"同步失败：{error}")
+        self.sync_status_text.set(format_sync_status_error(error))
 
     def _start_project(self) -> None:
         if self.monitor_only_var.get():

@@ -125,6 +125,9 @@ function describeLaunchError(error) {
   if (/ProcessSingleton|profile.*in use|user data directory is already in use|正在使用/i.test(message)) {
     return "系统 Chrome 登录目录正在被 Chrome 使用。请先关闭所有普通 Chrome 窗口，再点击“立即同步网页额度”。";
   }
+  if (/Target page, context or browser has been closed|Browser logs:|chrome\.exe/i.test(message)) {
+    return "系统 Chrome 登录目录无法被读取。请先关闭所有普通 Chrome 窗口；如果仍失败，请取消勾选“使用系统 Chrome 登录状态”，改用工具专用登录。";
+  }
   return null;
 }
 
